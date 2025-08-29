@@ -1,12 +1,61 @@
-use std::env;
+mod app;
+mod ui;
 
-fn main() {
-    let args = env::args();
-    let values: Vec<_> = args
-        .skip(1)
-        .map(|s| u32::from_str_radix(&s, 16).expect("not a valid hex number"))
-        .collect();
-    let res: Vec<_> = values.into_iter().map(f32::from_bits).collect();
+use app::App;
+use ui::ui;
+use ratatui::{
+    backend::CrosstermBackend,
+    crossterm::{
+        event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
+        execute,
+        terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    },
+    Terminal,
+};
+use std::io;
 
-    println!("{res:?}");
+fn main() -> io::Result<()> {
+    // setup terminal
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+
+    let mut app = App::new();
+
+    run_app(&mut terminal, &mut app)?;
+
+    // restore terminal
+    disable_raw_mode()?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
+    terminal.show_cursor()?;
+
+    Ok(())
+}
+
+fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App) -> io::Result<()> {
+    loop {
+        terminal.draw(|f| ui(f, app))?;
+
+        if let Event::Key(key) = event::read()? {
+            match key.code {
+                KeyCode::Enter => app.convert(),
+                KeyCode::Char(c) => {
+                    app.binary_input.push(c);
+                }
+                KeyCode::Backspace => {
+                    app.binary_input.pop();
+                }
+                KeyCode::Esc => {
+                    return Ok(());
+                }
+                _ => {}
+            }
+        }
+    }
 }
