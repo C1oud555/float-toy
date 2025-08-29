@@ -46,10 +46,10 @@ fn run_app(terminal: &mut Terminal<CrosstermBackend<io::Stdout>>, app: &mut App)
             match key.code {
                 KeyCode::Enter => app.convert(),
                 KeyCode::Char(c) => {
-                    app.binary_input.push(c);
+                    app.hex_input.push(c);
                 }
                 KeyCode::Backspace => {
-                    app.binary_input.pop();
+                    app.hex_input.pop();
                 }
                 KeyCode::Esc => {
                     return Ok(());
