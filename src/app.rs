@@ -1,3 +1,5 @@
+use ratatui::layout::Rect;
+
 #[derive(Clone, Copy, PartialEq, Debug)]
 pub enum FloatFormat {
     Fp32,
@@ -56,6 +58,7 @@ impl FloatFormat {
 
 pub struct App {
     pub hex_input: String,
+    pub float_input: String,
     pub float_output: String,
     pub bits: Vec<u8>,
     pub exponent_bits_input: String,
@@ -64,11 +67,13 @@ pub struct App {
     pub mantissa_bits: u8,
     pub current_format: FloatFormat,
     pub active_input: InputField,
+    pub format_button_areas: Vec<Rect>,
 }
 
 #[derive(PartialEq)]
 pub enum InputField {
     Hex,
+    Float,
     Exponent,
     Mantissa,
 }
@@ -79,6 +84,7 @@ impl App {
         let (exponent_bits, mantissa_bits) = FloatFormat::Fp32.get_params();
         let mut app = App {
             hex_input: "40490fdb".to_string(),
+            float_input: "3.141592".to_string(),
             float_output: String::new(),
             bits: vec![0; 32],
             exponent_bits_input: exponent_bits.to_string(),
@@ -87,8 +93,9 @@ impl App {
             mantissa_bits,
             current_format: FloatFormat::Fp32,
             active_input: InputField::Hex,
+            format_button_areas: Vec::new(),
         };
-        app.convert();
+        app.convert_hex_to_float();
         app
     }
 
@@ -103,7 +110,7 @@ impl App {
         }
         let total_bits = 1 + self.exponent_bits + self.mantissa_bits;
         self.bits.resize(total_bits as usize, 0);
-        self.convert();
+        self.convert_hex_to_float();
     }
 
     pub fn update_custom_format(&mut self) {
@@ -116,11 +123,11 @@ impl App {
              self.current_format = FloatFormat::Custom;
              let total_bits = 1 + self.exponent_bits + self.mantissa_bits;
              self.bits.resize(total_bits as usize, 0);
-             self.convert();
+             self.convert_hex_to_float();
         }
     }
 
-    pub fn convert(&mut self) {
+    pub fn convert_hex_to_float(&mut self) {
         let total_bits = (1 + self.exponent_bits + self.mantissa_bits) as usize;
         if total_bits > 64 {
             self.float_output = "Total bits > 64 not supported".to_string();
@@ -183,10 +190,80 @@ impl App {
 
             let float_value = sign * mantissa_float * 2.0f64.powi(exponent);
             self.float_output = float_value.to_string();
+            self.float_input = float_value.to_string();
 
         } else {
             self.float_output = "Invalid hex input".to_string();
             self.bits.fill(0);
+        }
+    }
+
+    pub fn convert_float_to_hex(&mut self) {
+        if let Ok(float_val) = self.float_input.parse::<f64>() {
+            let total_bits = 1 + self.exponent_bits + self.mantissa_bits;
+            if total_bits > 64 {
+                self.hex_input = "Total bits > 64 not supported".to_string();
+                return;
+            }
+
+            if float_val.is_nan() {
+                let exp = (1 << self.exponent_bits) - 1;
+                let mant = 1 << (self.mantissa_bits - 1);
+                let bits = (exp << self.mantissa_bits) | mant;
+                self.hex_input = format!("{:x}", bits);
+                self.convert_hex_to_float();
+                return;
+            }
+
+            if float_val.is_infinite() {
+                let sign = if float_val.is_sign_negative() { 1 } else { 0 };
+                let exp = (1 << self.exponent_bits) - 1;
+                let bits = (sign << (total_bits - 1)) | (exp << self.mantissa_bits);
+                self.hex_input = format!("{:x}", bits);
+                self.convert_hex_to_float();
+                return;
+            }
+
+            let sign = if float_val.is_sign_negative() { 1u64 } else { 0u64 };
+            if float_val == 0.0 {
+                let bits = sign << (total_bits - 1);
+                self.hex_input = format!("{:x}", bits);
+                self.convert_hex_to_float();
+                return;
+            }
+
+            let abs_val = float_val.abs();
+            let bias = (1 << (self.exponent_bits - 1)) - 1;
+            let min_exp = 1 - bias;
+            let max_exp = (1i32 << self.exponent_bits) - 2 - bias;
+
+            let exp = abs_val.log2().floor() as i32;
+            let mut mant = abs_val / 2.0f64.powi(exp); // mant in [1, 2)
+
+            if exp > max_exp { // Overflow to infinity
+                let exp_bits = (1 << self.exponent_bits) - 1;
+                let bits = (sign << (total_bits - 1)) | (exp_bits << self.mantissa_bits);
+                self.hex_input = format!("{:x}", bits);
+                self.convert_hex_to_float();
+                return;
+            }
+
+            let (exp_bits, mant_bits) = if exp < min_exp { // Subnormal
+                mant = mant * 2.0f64.powi(exp - min_exp);
+                let mant_bits = (mant * (1u64 << self.mantissa_bits) as f64).round() as u64;
+                (0, mant_bits)
+            } else { // Normal
+                mant = mant - 1.0; // remove implicit 1, mant in [0, 1)
+                let mant_bits = (mant * (1u64 << self.mantissa_bits) as f64).round() as u64;
+                ((exp + bias) as u64, mant_bits)
+            };
+
+            let bits = (sign << (total_bits - 1)) | (exp_bits << self.mantissa_bits) | mant_bits;
+            let hex_len = (total_bits as usize + 3) / 4;
+            self.hex_input = format!("{:0width$x}", bits, width = hex_len);
+            self.convert_hex_to_float();
+        } else {
+            self.hex_input = "Invalid float input".to_string();
         }
     }
 }
